@@ -115,12 +115,12 @@ handle these cases better, at the cost of more implementation complexity.
 
 **Actual chunk count produced across all 8 rule books:**
 
-```
-[your answer here]
+```txt
+149 chunks stored.
 ```
 
 **One thing that surprised you or didn't match your expectations:**
 
-```
-[your answer here]
+```txt
+I was surprised with how small the chunk count is, 149 is a big number but there's a lot of information out there.
 ```
