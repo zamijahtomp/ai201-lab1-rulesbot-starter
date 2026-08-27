@@ -52,30 +52,65 @@ Results should be ordered from most to least relevant (lowest to highest distanc
 
 ### Return structure
 
-*Sketch out what one item in your return list looks like as a concrete example. Where does each field come from in the query results?*
+```txt
+One item looks like:
 
-```
-[your answer here]
+{
+    "text": "The longest road award goes to the player with at least 5 connected roads...",
+    "game": "Catan",
+    "distance": 0.31,
+}
+
+- "text" comes from results["documents"][0][i]
+- "game" comes from results["metadatas"][0][i]["game"]
+- "distance" comes from results["distances"][0][i]
+
+where i is the rank of the result (0 = most similar). Chroma already
+returns results ordered by ascending distance, so building the list by
+iterating i in order preserves "most to least relevant" without any
+extra sorting.
 ```
 
 ---
 
 ### Handling the nested result structure
 
-*`_collection.query()` returns nested lists. Describe what index you need to access to get the actual list of results for a single query, and why the nesting exists.*
+```txt
+results["documents"], results["metadatas"], and results["distances"] are
+each a list-of-lists: the outer list has one entry per query string
+passed in query_texts, and the inner list has one entry per result for
+that query. Since retrieve() only ever passes a single query string
+(query_texts=[query]), the results I want are always at index [0] of
+the outer list, e.g. results["documents"][0] is the list of chunk texts
+for my one query. I then zip/iterate the three [0] lists together (by
+index i) to build one dict per result.
 
-```
-[your answer here]
+The nesting exists because query_texts accepts multiple queries in one
+call, batching several searches in a single round-trip to the
+embedding model and the index.
 ```
 
 ---
 
 ### Relevance threshold
 
-*Will you filter out results above a certain distance score, or return all `n_results` regardless of how relevant they are? What are the tradeoffs of each approach?*
+```txt
+No threshold — return all n_results as-is, ranked by distance.
 
-```
-[your answer here]
+Rationale: with only 8 rule books and a few hundred chunks total, even
+the "worst" of n_results=3-5 results is usually still topically
+related, and generate_response() (the LLM) is well-suited to judge
+relevance and say "I don't see that rule" if the retrieved context
+doesn't actually answer the question. A fixed distance cutoff is risky
+to tune without much data: too strict and it silently drops the one
+useful chunk for a valid question (false negative → app looks broken
+for no reason); too loose and it does nothing.
+
+Tradeoff: no threshold means low-quality/no-match queries still get
+n_results context stuffed into the prompt, which could nudge the LLM
+toward a plausible-but-wrong answer instead of "I don't know." If that
+becomes a problem in testing, the cheap fix is to add a cutoff (e.g.
+distance > 1.0 gets dropped) rather than building it in upfront.
 ```
 
 ---
@@ -92,19 +127,34 @@ Results should be ordered from most to least relevant (lowest to highest distanc
 
 ## Implementation Notes
 
-*Fill this in after implementing, before moving to Milestone 3.*
-
 **Test query and top result returned:**
 
-```
-Query: [your test query]
-Top result game: [game name]
-Distance score: [score]
-Does it make sense? [yes / no / explain]
+```txt
+Query: "How many points to win?"
+Top result game: Uno
+Distance score: 0.323
+Does it make sense? Yes — top 3 results all came from Uno's "WINNING
+THE GAME" section (first to 500 points across rounds). Makes sense
+since "points to win" maps almost literally onto Uno's scoring rule,
+and no other rule book in the set uses a points-based win condition.
 ```
 
 **One thing about the query results that surprised you:**
 
-```
-[your answer here]
+```txt
+"What happens when you roll a 7?" returned Catan's actual "ROLLING A 7"
+rule (discard half, move robber, steal a card) at distance 0.466 — much
+higher than the "points to win" example (0.323), even though it's a
+clean, correct top-1 match ahead of unrelated Risk chunks at 0.597+.
+Distance isn't a fixed pass/fail threshold — it depends on how closely
+the query's wording overlaps with the rule book's phrasing (e.g. "roll
+a 7" vs. the heading "ROLLING A 7" plus prose describing it). What
+matters is relative ranking within a query, not an absolute cutoff
+across queries.
+
+"How do you win?" returned chunks from four different games (Catan,
+Ticket to Ride, Pandemic, Monopoly) — see the multi-game analysis
+above. This isn't a bug: the query never named a game, so surfacing
+each game's genuinely relevant winning-conditions chunk is the correct
+behavior for an ambiguous, cross-game question.
 ```
